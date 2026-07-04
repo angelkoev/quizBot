@@ -47,9 +47,9 @@ Add the bot to a Telegram group chat and use the following commands:
 | `/join` | Join the current game |
 | `/ready` | Mark yourself as ready (does **not** start the game) |
 | `/startGame` | Start the game — only works once every joined player has `/ready`'d |
-| `/pauseGame` | Pause after the current question finishes — the round in progress is never interrupted |
-| `/resumeGame` | Resume a paused game, continuing with the next question |
-| `/endGame` | End the current game early (before or during play) and show the leaderboard so far |
+| `/pauseGame` | Pause after the current question finishes — the round in progress is never interrupted. Joined players only |
+| `/resumeGame` | Resume a paused game, continuing with the next question. Joined players only |
+| `/endGame` | End the current game early (before or during play) and show the leaderboard so far. Joined players only |
 | `/list` | List joined players and who's ready |
 | `/help` | Show command help |
 
