@@ -1,7 +1,5 @@
 package com.akoev.quizBot.model;
 
-import lombok.Getter;
-
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -9,7 +7,6 @@ import java.util.Map;
 public class Question {
 
     private final String question;
-    @Getter
     private Map<String, String> options; // A, B, C, D
     private final String correctKey;
 
@@ -21,6 +18,10 @@ public class Question {
 
     public String getQuestion() {
         return question;
+    }
+
+    public Map<String, String> getOptions() {
+        return options;
     }
 
     public String getCorrectKey() {

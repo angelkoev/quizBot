@@ -4,6 +4,7 @@ import com.akoev.quizBot.model.GameState;
 import com.akoev.quizBot.model.Player;
 import com.akoev.quizBot.model.Question;
 import com.akoev.quizBot.service.GameService;
+import com.akoev.quizBot.service.GameService.AnswerResult;
 import com.pengrad.telegrambot.*;
 import com.pengrad.telegrambot.model.Update;
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton;
@@ -21,7 +22,6 @@ public class QuizBot {
 
     private final TelegramBot bot;
     private final GameService gameService;
-    private long chatIdanswer;
 
     public QuizBot(GameService gameService,
                    @Value("${telegram.bot.token}") String token) {
@@ -44,13 +44,11 @@ public class QuizBot {
 
                     long chatId = update.callbackQuery().message().chat().id();
                     long userId = update.callbackQuery().from().id();
-                    String answer = update.callbackQuery().data();
+                    String data = update.callbackQuery().data();
+                    String callbackId = update.callbackQuery().id();
                     String room = String.valueOf(chatId);
 
-                    // 🔥 ВАЖНО – ACK
-                    bot.execute(new AnswerCallbackQuery(update.callbackQuery().id()));
-
-                    handleAnswer(room, userId, answer);
+                    handleAnswer(room, chatId, userId, data, callbackId);
                     continue;
                 }
 
@@ -67,7 +65,6 @@ public class QuizBot {
 
                 if (text.startsWith("/")) {
                     handleCommand(text, chatId, userId, room, update);
-
                 }
             }
 
@@ -85,7 +82,7 @@ public class QuizBot {
         if (text.equals("/start")) {
             bot.execute(new SendMessage(chatId,
                     "🎮 Quiz Bot Ready!\n\n" +
-                            "/categories\n/newQuiz\n/join\n/ready\n/list\n/help"));
+                            "/categories\n/newQuiz\n/join\n/ready\n/startGame\n/list\n/help"));
             return;
         }
 
@@ -93,11 +90,12 @@ public class QuizBot {
             bot.execute(new SendMessage(chatId,
                     """
                     🎮 Quiz Bot Commands:
-    
+
                     /categories - show categories
                     /newQuiz <category|all> <count>
                     /join - join game
-                    /ready - start game
+                    /ready - mark yourself as ready
+                    /startGame - start once everyone is ready
                     /list - players
                     """));
             return;
@@ -114,6 +112,12 @@ public class QuizBot {
 
         if (text.startsWith("/newQuiz")) {
 
+            if (g != null && g.getPhase() == GameState.GamePhase.IN_GAME) {
+                bot.execute(new SendMessage(chatId,
+                        "⚠️ A game is already in progress in this chat. Wait for it to finish."));
+                return;
+            }
+
             String[] p = text.split(" ");
             if (p.length < 3) {
                 bot.execute(new SendMessage(chatId, "Usage: /newQuiz <category|all> <count>"));
@@ -121,18 +125,32 @@ public class QuizBot {
             }
 
             String category = p[1];
-            int count = Integer.parseInt(p[2]);
+
+            if (!gameService.isValidCategory(category)) {
+                bot.execute(new SendMessage(chatId, "❌ Unknown category. Use /categories"));
+                return;
+            }
+
+            int count;
+            try {
+                count = Integer.parseInt(p[2]);
+            } catch (NumberFormatException e) {
+                bot.execute(new SendMessage(chatId, "Usage: /newQuiz <category|all> <count>"));
+                return;
+            }
+
+            if (count <= 0) {
+                bot.execute(new SendMessage(chatId, "❌ Count must be positive"));
+                return;
+            }
 
             gameService.createGame(room, category, count);
-
-            GameState state = gameService.get(room);
-            state.setPhase(GameState.GamePhase.WAITING);
 
             bot.execute(new SendMessage(chatId,
                     "🎮 Game created!\n" +
                             "Category: " + category + "\n" +
                             "Questions: " + count + "\n\n" +
-                            "👉 /join\n👉 /ready\n👉 /list"));
+                            "👉 /join\n👉 /ready\n👉 /startGame\n👉 /list"));
 
             return;
         }
@@ -144,7 +162,12 @@ public class QuizBot {
                 return;
             }
 
-            String name = update.message().from().firstName(); // или username
+            if (g.getPhase() != GameState.GamePhase.WAITING) {
+                bot.execute(new SendMessage(chatId, "⚠️ Game already started. Wait for the next one."));
+                return;
+            }
+
+            String name = update.message().from().firstName();
 
             boolean joined = gameService.join(room, userId, name);
 
@@ -165,9 +188,10 @@ public class QuizBot {
             }
 
             StringBuilder sb = new StringBuilder("👥 Players:\n\n");
-            g.players.values().forEach(p ->
-                    sb.append("• ").append(p.getName()).append("\n")
-            );
+            g.players.values().forEach(p -> {
+                boolean ready = g.readyPlayers.contains(p.getId());
+                sb.append(ready ? "✅ " : "• ").append(p.getName()).append("\n");
+            });
 
             bot.execute(new SendMessage(chatId, sb.toString()));
             return;
@@ -175,8 +199,54 @@ public class QuizBot {
 
         if (text.equals("/ready")) {
 
-            if (g == null || g.players.isEmpty()) {
-                bot.execute(new SendMessage(chatId, "❌ No players"));
+            if (g == null) {
+                bot.execute(new SendMessage(chatId, "❌ No game. Use /newQuiz first"));
+                return;
+            }
+
+            if (g.getPhase() != GameState.GamePhase.WAITING) {
+                bot.execute(new SendMessage(chatId, "⚠️ Game already started"));
+                return;
+            }
+
+            if (!g.players.containsKey(userId)) {
+                bot.execute(new SendMessage(chatId, "❌ Join first with /join"));
+                return;
+            }
+
+            boolean nowReady = g.readyPlayers.add(userId);
+            String name = g.players.get(userId).getName();
+
+            bot.execute(new SendMessage(chatId,
+                    (nowReady ? "✅ " + name + " is ready" : "⚠️ " + name + " is already ready")
+                            + " (" + g.readyPlayers.size() + "/" + g.players.size() + ")\n"
+                            + "👉 /startGame when everyone is ready"));
+            return;
+        }
+
+        if (text.equals("/startGame")) {
+
+            if (g == null) {
+                bot.execute(new SendMessage(chatId, "❌ No game. Use /newQuiz first"));
+                return;
+            }
+
+            if (g.getPhase() != GameState.GamePhase.WAITING) {
+                bot.execute(new SendMessage(chatId, "⚠️ Game already started"));
+                return;
+            }
+
+            if (g.players.isEmpty()) {
+                bot.execute(new SendMessage(chatId, "❌ No players. Use /join first"));
+                return;
+            }
+
+            if (!g.allPlayersReady()) {
+                StringBuilder sb = new StringBuilder("⏳ Waiting for players to /ready:\n\n");
+                g.players.values().stream()
+                        .filter(p -> !g.readyPlayers.contains(p.getId()))
+                        .forEach(p -> sb.append("• ").append(p.getName()).append("\n"));
+                bot.execute(new SendMessage(chatId, sb.toString()));
                 return;
             }
 
@@ -187,36 +257,37 @@ public class QuizBot {
     }
 
     // =========================
-    // ANSWERS (INLINE / TEXT)
+    // ANSWERS (INLINE BUTTONS ONLY)
     // =========================
-    private void handleAnswer(String room, long userId, String answer) {
+    private void handleAnswer(String room, long chatId, long userId, String data, String callbackId) {
 
-        long chatId = Long.parseLong(room);
-
-        GameState g = gameService.get(room);
-        if (g == null || !g.roundActive) return;
-
-        gameService.answer(room, userId, answer);
-
-        if (!gameService.allAnswered(room)) {
+        int roundId;
+        String answer;
+        try {
+            String[] parts = data.split(":");
+            answer = parts[0];
+            roundId = Integer.parseInt(parts[1]);
+        } catch (Exception e) {
+            bot.execute(new AnswerCallbackQuery(callbackId));
             return;
         }
 
-        // only FIRST time we reach this
-        g.roundActive = false;
+        AnswerResult result = gameService.submitAnswer(room, userId, roundId, answer);
 
-        gameService.cancelTimer(room);
-
-        sendResults(chatId, room);
-
-        gameService.next(room);
-
-        if (gameService.isGameOver(room)) {
-            sendFinal(chatId, room);
-        } else {
-            startRound(chatId, room);
+        switch (result) {
+            case NO_GAME, STALE_ROUND -> bot.execute(new AnswerCallbackQuery(callbackId)
+                    .text("⏱ That round is over.").showAlert(false));
+            case ALREADY_ANSWERED -> bot.execute(new AnswerCallbackQuery(callbackId)
+                    .text("✅ You already answered this round.").showAlert(false));
+            case RECORDED -> bot.execute(new AnswerCallbackQuery(callbackId)
+                    .text("Answer received!"));
+            case ROUND_COMPLETE -> {
+                bot.execute(new AnswerCallbackQuery(callbackId).text("Answer received!"));
+                finishRound(chatId, room);
+            }
         }
     }
+
     // =========================
     // GAME FLOW
     // =========================
@@ -225,48 +296,45 @@ public class QuizBot {
         GameState g = gameService.get(room);
         if (g == null) return;
 
-        // 🔥 reset round state
-        g.roundActive = true;
-        g.answeredThisRound.clear();
-        g.roundCorrect.clear();
-        g.setFinishedRound(false);
+        int roundId = gameService.openRound(room);
+        if (roundId < 0) return;
 
+        sendQuestion(chatId, room, g);
 
-        sendQuestion(chatId, room);
+        gameService.startTimer(room, roundId, () -> finishRound(chatId, room));
+    }
 
-        gameService.startTimer(room, () -> {
+    /**
+     * Called exactly once per round - either from the last player's answer or from
+     * timer expiry, whichever wins the CAS in GameState#tryCloseRound. Never both.
+     */
+    private void finishRound(long chatId, String room) {
 
-            GameState state = gameService.get(room);
-            if (state == null || !state.roundActive) return;
+        gameService.cancelTimer(room);
 
-            state.roundActive = false;
+        sendResults(chatId, room);
 
-            sendResults(chatId, room);
+        gameService.advance(room);
 
-            gameService.next(room);
-
-            if (!gameService.isGameOver(room)) {
-                startRound(chatId, room);
-            } else {
-                sendFinal(chatId, room);
-            }
-        });
+        if (gameService.isGameOver(room)) {
+            GameState g = gameService.get(room);
+            if (g != null) g.setPhase(GameState.GamePhase.FINISHED);
+            sendFinal(chatId, room);
+        } else {
+            startRound(chatId, room);
+        }
     }
 
     // =========================
     // QUESTION
     // =========================
-    private void sendQuestion(long chatId, String room) {
-
-        GameState g = gameService.get(room);
-
-        if (g == null) return;
-        g.roundActive = true;
+    private void sendQuestion(long chatId, String room, GameState g) {
 
         Question q = gameService.current(room);
 
         int current = g.getIndex() + 1;
         int total = g.getQuestions().size();
+        int roundId = g.getRoundId();
 
         StringBuilder sb = new StringBuilder();
 
@@ -278,12 +346,13 @@ public class QuizBot {
                 .append("❓ ")
                 .append(q.getQuestion());
 
-        // INLINE BUTTONS (A, B, C, D)
+        // INLINE BUTTONS (A, B, C, D) - callback data is tagged with the round id so
+        // a press on this exact keyboard can never be mistaken for a later round.
         List<InlineKeyboardButton> buttons = q.getOptions().entrySet()
                 .stream()
                 .map(e ->
                         new InlineKeyboardButton(e.getKey() + ") " + e.getValue())
-                                .callbackData(e.getKey())
+                                .callbackData(e.getKey() + ":" + roundId)
                 )
                 .toList();
 
@@ -305,6 +374,7 @@ public class QuizBot {
     private void sendResults(long chatId, String room) {
 
         GameState g = gameService.get(room);
+        if (g == null) return;
 
         StringBuilder sb = new StringBuilder("📊 Round results:\n\n");
 
@@ -312,7 +382,7 @@ public class QuizBot {
 
             String name = g.players.get(userId).getName();
 
-            boolean answered = g.answeredThisRound.contains(userId);
+            boolean answered = g.getAnsweredThisRound().contains(userId);
             boolean correct = g.roundCorrect.getOrDefault(userId, false);
 
             if (correct) {
@@ -330,6 +400,7 @@ public class QuizBot {
     private void sendFinal(long chatId, String room) {
 
         GameState g = gameService.get(room);
+        if (g == null) return;
 
         StringBuilder sb = new StringBuilder("🏆 FINAL RESULTS:\n\n");
 
@@ -338,10 +409,7 @@ public class QuizBot {
                 .forEach(e -> {
 
                     Player p = g.players.get(e.getKey());
-
-                    String name = (p != null)
-                            ? p.getName()
-                            : String.valueOf(e.getKey());
+                    String name = (p != null) ? p.getName() : String.valueOf(e.getKey());
 
                     sb.append(name)
                             .append(": ")
@@ -356,19 +424,4 @@ public class QuizBot {
         if (text == null) return null;
         return text.split("@")[0].trim();
     }
-
-//    private String getUserName(com.pengrad.telegrambot.model.User user) {
-//
-//        if (user.username() != null && !user.username().isBlank()) {
-//            return "@" + user.username();
-//        }
-//
-//        String name = user.firstName();
-//
-//        if (user.lastName() != null) {
-//            name += " " + user.lastName();
-//        }
-//
-//        return name;
-//    }
 }
