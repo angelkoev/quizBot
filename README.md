@@ -23,8 +23,6 @@ On Windows PowerShell:
 $env:TELEGRAM_BOT_TOKEN = "123456789:your-token-here"
 ```
 
-> If you ever paste a real token into a file that gets committed, revoke it immediately via `@BotFather` (`/revoke`) and issue a new one — a token in git history should be treated as compromised even after it's removed from the latest commit.
-
 ## Running
 
 ```bash
