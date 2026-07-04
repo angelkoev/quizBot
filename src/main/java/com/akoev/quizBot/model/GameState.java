@@ -11,6 +11,16 @@ public class GameState {
 
     public String category;
 
+    private volatile int timeoutSeconds;
+
+    public int getTimeoutSeconds() {
+        return timeoutSeconds;
+    }
+
+    public void setTimeoutSeconds(int timeoutSeconds) {
+        this.timeoutSeconds = timeoutSeconds;
+    }
+
     private List<Question> questions;
 
     public List<Question> getQuestions() {

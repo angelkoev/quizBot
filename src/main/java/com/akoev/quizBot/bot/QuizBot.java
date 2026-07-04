@@ -82,7 +82,7 @@ public class QuizBot {
         if (text.equals("/start")) {
             bot.execute(new SendMessage(chatId,
                     "🎮 Quiz Bot Ready!\n\n" +
-                            "/categories\n/newQuiz\n/join\n/ready\n/startGame\n/list\n/help"));
+                            "/categories\n/newGame\n/join\n/ready\n/startGame\n/list\n/help"));
             return;
         }
 
@@ -92,12 +92,12 @@ public class QuizBot {
                     🎮 Quiz Bot Commands:
 
                     /categories - show categories
-                    /newQuiz <category|all> <count>
+                    /newGame <category|all> <count> [timeout] - create a game (timeout in seconds per question, default %d)
                     /join - join game
                     /ready - mark yourself as ready
                     /startGame - start once everyone is ready
                     /list - players
-                    """));
+                    """.formatted(GameService.DEFAULT_TIMEOUT_SECONDS)));
             return;
         }
 
@@ -110,7 +110,7 @@ public class QuizBot {
             return;
         }
 
-        if (text.startsWith("/newQuiz")) {
+        if (text.startsWith("/newGame")) {
 
             if (g != null && g.getPhase() == GameState.GamePhase.IN_GAME) {
                 bot.execute(new SendMessage(chatId,
@@ -118,9 +118,11 @@ public class QuizBot {
                 return;
             }
 
+            String usage = "Usage: /newGame <category|all> <count> [timeout]";
+
             String[] p = text.split(" ");
             if (p.length < 3) {
-                bot.execute(new SendMessage(chatId, "Usage: /newQuiz <category|all> <count>"));
+                bot.execute(new SendMessage(chatId, usage));
                 return;
             }
 
@@ -135,7 +137,7 @@ public class QuizBot {
             try {
                 count = Integer.parseInt(p[2]);
             } catch (NumberFormatException e) {
-                bot.execute(new SendMessage(chatId, "Usage: /newQuiz <category|all> <count>"));
+                bot.execute(new SendMessage(chatId, usage));
                 return;
             }
 
@@ -144,12 +146,28 @@ public class QuizBot {
                 return;
             }
 
-            gameService.createGame(room, category, count);
+            int timeoutSeconds = GameService.DEFAULT_TIMEOUT_SECONDS;
+            if (p.length >= 4) {
+                try {
+                    timeoutSeconds = Integer.parseInt(p[3]);
+                } catch (NumberFormatException e) {
+                    bot.execute(new SendMessage(chatId, usage));
+                    return;
+                }
+
+                if (timeoutSeconds <= 0) {
+                    bot.execute(new SendMessage(chatId, "❌ Timeout must be positive"));
+                    return;
+                }
+            }
+
+            gameService.createGame(room, category, count, timeoutSeconds);
 
             bot.execute(new SendMessage(chatId,
                     "🎮 Game created!\n" +
                             "Category: " + category + "\n" +
-                            "Questions: " + count + "\n\n" +
+                            "Questions: " + count + "\n" +
+                            "Timeout: " + timeoutSeconds + "s\n\n" +
                             "👉 /join\n👉 /ready\n👉 /startGame\n👉 /list"));
 
             return;
@@ -158,12 +176,11 @@ public class QuizBot {
         if (text.equals("/join")) {
 
             if (g == null) {
-                bot.execute(new SendMessage(chatId, "❌ No game. Use /newQuiz"));
+                bot.execute(new SendMessage(chatId, "❌ No game. Use /newGame"));
                 return;
             }
 
-            if (g.getPhase() != GameState.GamePhase.WAITING) {
-                bot.execute(new SendMessage(chatId, "⚠️ Game already started. Wait for the next one."));
+            if (rejectIfNotWaiting(chatId, g, "⚠️ Game already started. Wait for the next one.")) {
                 return;
             }
 
@@ -200,12 +217,11 @@ public class QuizBot {
         if (text.equals("/ready")) {
 
             if (g == null) {
-                bot.execute(new SendMessage(chatId, "❌ No game. Use /newQuiz first"));
+                bot.execute(new SendMessage(chatId, "❌ No game. Use /newGame first"));
                 return;
             }
 
-            if (g.getPhase() != GameState.GamePhase.WAITING) {
-                bot.execute(new SendMessage(chatId, "⚠️ Game already started"));
+            if (rejectIfNotWaiting(chatId, g, "⚠️ Game already started")) {
                 return;
             }
 
@@ -227,12 +243,11 @@ public class QuizBot {
         if (text.equals("/startGame")) {
 
             if (g == null) {
-                bot.execute(new SendMessage(chatId, "❌ No game. Use /newQuiz first"));
+                bot.execute(new SendMessage(chatId, "❌ No game. Use /newGame first"));
                 return;
             }
 
-            if (g.getPhase() != GameState.GamePhase.WAITING) {
-                bot.execute(new SendMessage(chatId, "⚠️ Game already started"));
+            if (rejectIfNotWaiting(chatId, g, "⚠️ Game already started")) {
                 return;
             }
 
@@ -254,6 +269,28 @@ public class QuizBot {
 
             startRound(chatId, room);
         }
+    }
+
+    /**
+     * Blocks a WAITING-only command when the game has moved past that phase, sending a
+     * message that reflects the actual phase (in progress vs. already finished) rather
+     * than a generic "already started" that misleads once the game is FINISHED.
+     *
+     * @return true if the command was rejected (caller should return immediately)
+     */
+    private boolean rejectIfNotWaiting(long chatId, GameState g, String inGameMessage) {
+
+        if (g.getPhase() == GameState.GamePhase.IN_GAME) {
+            bot.execute(new SendMessage(chatId, inGameMessage));
+            return true;
+        }
+
+        if (g.getPhase() == GameState.GamePhase.FINISHED) {
+            bot.execute(new SendMessage(chatId, "🏁 That game finished. Start a new one with /newGame"));
+            return true;
+        }
+
+        return false;
     }
 
     // =========================
@@ -404,18 +441,21 @@ public class QuizBot {
 
         StringBuilder sb = new StringBuilder("🏆 FINAL RESULTS:\n\n");
 
-        g.scores.entrySet().stream()
-                .sorted((a, b) -> b.getValue() - a.getValue())
-                .forEach(e -> {
+        g.players.keySet().stream()
+                .sorted((a, b) -> g.scores.getOrDefault(b, 0) - g.scores.getOrDefault(a, 0))
+                .forEach(userId -> {
 
-                    Player p = g.players.get(e.getKey());
-                    String name = (p != null) ? p.getName() : String.valueOf(e.getKey());
+                    Player p = g.players.get(userId);
+                    String name = (p != null) ? p.getName() : String.valueOf(userId);
+                    int score = g.scores.getOrDefault(userId, 0);
 
                     sb.append(name)
                             .append(": ")
-                            .append(e.getValue())
+                            .append(score)
                             .append("\n");
                 });
+
+        sb.append("\n👉 /newGame to start a new game\n👉 /help for all commands");
 
         bot.execute(new SendMessage(chatId, sb.toString()));
     }

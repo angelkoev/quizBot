@@ -44,7 +44,7 @@ Add the bot to a Telegram group chat and use the following commands:
 
 | Command | Description |
 |---|---|
-| `/newQuiz <category\|all> <count>` | Create a new game with `count` questions from `<category>` (or `all`) |
+| `/newGame <category\|all> <count> [timeout]` | Create a new game with `count` questions from `<category>` (or `all`); `timeout` is seconds per question (default 60) |
 | `/categories` | List available question categories |
 | `/join` | Join the current game |
 | `/ready` | Mark yourself as ready (does **not** start the game) |
@@ -54,14 +54,14 @@ Add the bot to a Telegram group chat and use the following commands:
 
 ### Game flow
 
-1. Someone runs `/newQuiz <category> <count>` to create a game in the chat.
+1. Someone runs `/newGame <category> <count> [timeout]` to create a game in the chat.
 2. Players run `/join` to enter, then `/ready` once they're prepared to play.
 3. Once everyone who joined is ready, anyone runs `/startGame` to begin.
 4. Each round, the bot posts a question with inline buttons (`A`/`B`/`C`/`D`) — answers are submitted by tapping a button, not by typing.
-5. A round ends as soon as every player has answered, or after a 60-second timeout, whichever comes first. Round results (correct/wrong/no answer per player) are posted, then the next question follows automatically.
-6. After the last question, a final leaderboard is posted sorted by score.
+5. A round ends as soon as every player has answered, or after the timeout (default 60s, configurable via `/newGame`'s third argument), whichever comes first. Round results (correct/wrong/no answer per player) are posted, then the next question follows automatically.
+6. After the last question, a final leaderboard is posted sorted by score, along with a prompt to `/newGame` again.
 
-A new `/newQuiz` can't be started while a game is already in progress in that chat; finish or wait out the current game first.
+A new `/newGame` can't be started while a game is already in progress in that chat; finish or wait out the current game first.
 
 ## Question categories
 

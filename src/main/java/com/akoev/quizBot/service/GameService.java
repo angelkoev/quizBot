@@ -13,6 +13,8 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class GameService {
 
+    public static final int DEFAULT_TIMEOUT_SECONDS = 60;
+
     /**
      * Result of an answer submission, telling the caller exactly what to do next.
      * ROUND_COMPLETE is returned to at most one caller per round - it is the signal
@@ -43,7 +45,7 @@ public class GameService {
     }
 
     // CREATE ROOM
-    public void createGame(String chatId, String category, int count) {
+    public void createGame(String chatId, String category, int count, int timeoutSeconds) {
 
         cancelTimer(chatId);
 
@@ -65,6 +67,7 @@ public class GameService {
         GameState g = new GameState();
         g.category = category;
         g.setQuestions(opts.subList(0, Math.min(count, opts.size())));
+        g.setTimeoutSeconds(timeoutSeconds);
 
         games.put(chatId, g);
     }
@@ -164,16 +167,19 @@ public class GameService {
 
         cancelTimer(chatId);
 
+        GameState g = games.get(chatId);
+        int timeoutSeconds = (g != null) ? g.getTimeoutSeconds() : DEFAULT_TIMEOUT_SECONDS;
+
         ScheduledFuture<?> task = scheduler.schedule(() -> {
 
-            GameState g = games.get(chatId);
-            if (g == null || g.getRoundId() != roundId) return;
+            GameState current = games.get(chatId);
+            if (current == null || current.getRoundId() != roundId) return;
 
-            if (g.tryCloseRound()) {
+            if (current.tryCloseRound()) {
                 onTimeout.run();
             }
 
-        }, 60, TimeUnit.SECONDS);
+        }, timeoutSeconds, TimeUnit.SECONDS);
 
         timers.put(chatId, task);
     }
