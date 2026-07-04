@@ -12,7 +12,6 @@ import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup;
 import com.pengrad.telegrambot.request.AnswerCallbackQuery;
 import com.pengrad.telegrambot.request.SendMessage;
 import jakarta.annotation.PostConstruct;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -23,11 +22,9 @@ public class QuizBot {
     private final TelegramBot bot;
     private final GameService gameService;
 
-    public QuizBot(GameService gameService,
-                   @Value("${telegram.bot.token}") String token) {
-
+    public QuizBot(GameService gameService, TelegramBot bot) {
         this.gameService = gameService;
-        this.bot = new TelegramBot(token);
+        this.bot = bot;
     }
 
     @PostConstruct
@@ -48,11 +45,7 @@ public class QuizBot {
                     String callbackId = update.callbackQuery().id();
                     String room = String.valueOf(chatId);
 
-                    if (data.equals("REPLAY")) {
-                        handleReplay(room, chatId, callbackId);
-                    } else {
-                        handleAnswer(room, chatId, userId, data, callbackId);
-                    }
+                    handleCallback(room, chatId, userId, data, callbackId);
                     continue;
                 }
 
@@ -68,7 +61,7 @@ public class QuizBot {
                 String room = String.valueOf(chatId);
 
                 if (text.startsWith("/")) {
-                    handleCommand(text, chatId, userId, room, update);
+                    handleCommand(text, chatId, userId, room, update.message().from().firstName());
                 }
             }
 
@@ -79,7 +72,11 @@ public class QuizBot {
     // =========================
     // COMMANDS
     // =========================
-    private void handleCommand(String text, long chatId, long userId, String room, Update update) {
+    /**
+     * Package-private (rather than private) so tests can drive command handling directly
+     * with plain values, without needing to construct a real pengrad {@link Update}.
+     */
+    void handleCommand(String text, long chatId, long userId, String room, String firstName) {
 
         GameState g = gameService.get(room);
 
@@ -191,12 +188,10 @@ public class QuizBot {
                 return;
             }
 
-            String name = update.message().from().firstName();
-
-            boolean joined = gameService.join(room, userId, name);
+            boolean joined = gameService.join(room, userId, firstName);
 
             if (joined) {
-                bot.execute(new SendMessage(chatId, "👤 " + name + " joined"));
+                bot.execute(new SendMessage(chatId, "👤 " + firstName + " joined"));
             } else {
                 bot.execute(new SendMessage(chatId, "⚠️ Already joined"));
             }
@@ -377,6 +372,22 @@ public class QuizBot {
         }
 
         return false;
+    }
+
+    // =========================
+    // CALLBACK QUERIES (INLINE BUTTONS)
+    // =========================
+    /**
+     * Package-private for the same reason as {@link #handleCommand}: lets tests drive
+     * callback handling with plain values instead of a real pengrad callback query.
+     */
+    void handleCallback(String room, long chatId, long userId, String data, String callbackId) {
+
+        if (data.equals("REPLAY")) {
+            handleReplay(room, chatId, callbackId);
+        } else {
+            handleAnswer(room, chatId, userId, data, callbackId);
+        }
     }
 
     // =========================
