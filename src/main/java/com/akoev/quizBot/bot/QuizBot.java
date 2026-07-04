@@ -86,7 +86,7 @@ public class QuizBot {
         if (text.equals("/start")) {
             bot.execute(new SendMessage(chatId,
                     "🎮 Quiz Bot Ready!\n\n" +
-                            "/categories\n/newGame\n/join\n/ready\n/startGame\n/list\n/help"));
+                            "/categories\n/newGame\n/join\n/ready\n/startGame\n/pauseGame\n/resumeGame\n/endGame\n/list\n/help"));
             return;
         }
 
@@ -100,6 +100,9 @@ public class QuizBot {
                     /join - join game
                     /ready - mark yourself as ready
                     /startGame - start once everyone is ready
+                    /pauseGame - pause after the current question
+                    /resumeGame - resume a paused game
+                    /endGame - end the game early
                     /list - players
                     """.formatted(GameService.DEFAULT_TIMEOUT_SECONDS)));
             return;
@@ -272,6 +275,85 @@ public class QuizBot {
             g.setPhase(GameState.GamePhase.IN_GAME);
 
             startRound(chatId, room);
+            return;
+        }
+
+        if (text.equals("/pauseGame")) {
+
+            if (g == null || g.getPhase() != GameState.GamePhase.IN_GAME) {
+                bot.execute(new SendMessage(chatId, "❌ No game in progress to pause."));
+                return;
+            }
+
+            if (!g.players.containsKey(userId)) {
+                bot.execute(new SendMessage(chatId, "❌ Only joined players can pause the game."));
+                return;
+            }
+
+            if (g.isPaused()) {
+                bot.execute(new SendMessage(chatId, "⚠️ Game is already paused."));
+                return;
+            }
+
+            g.setPaused(true);
+            bot.execute(new SendMessage(chatId,
+                    "⏸ Game will pause after this question. Use /resumeGame to continue."));
+            return;
+        }
+
+        if (text.equals("/resumeGame")) {
+
+            if (g == null || g.getPhase() != GameState.GamePhase.IN_GAME) {
+                bot.execute(new SendMessage(chatId, "❌ No game in progress to resume."));
+                return;
+            }
+
+            if (!g.players.containsKey(userId)) {
+                bot.execute(new SendMessage(chatId, "❌ Only joined players can resume the game."));
+                return;
+            }
+
+            if (!g.isPaused()) {
+                bot.execute(new SendMessage(chatId, "⚠️ Game is not paused."));
+                return;
+            }
+
+            g.setPaused(false);
+
+            if (g.isAwaitingResume()) {
+                g.setAwaitingResume(false);
+                bot.execute(new SendMessage(chatId, "▶️ Resuming game..."));
+                startRound(chatId, room);
+            } else {
+                bot.execute(new SendMessage(chatId, "▶️ Game will no longer pause after this question."));
+            }
+            return;
+        }
+
+        if (text.equals("/endGame")) {
+
+            if (g == null || g.getPhase() == GameState.GamePhase.FINISHED) {
+                bot.execute(new SendMessage(chatId, "❌ No active game to end."));
+                return;
+            }
+
+            if (!g.players.containsKey(userId)) {
+                bot.execute(new SendMessage(chatId, "❌ Only joined players can end the game."));
+                return;
+            }
+
+            boolean wasInGame = g.getPhase() == GameState.GamePhase.IN_GAME;
+
+            gameService.cancelTimer(room);
+            g.tryCloseRound();
+            g.setPhase(GameState.GamePhase.FINISHED);
+
+            if (wasInGame) {
+                bot.execute(new SendMessage(chatId, "🛑 Game ended early."));
+                sendFinal(chatId, room);
+            } else {
+                bot.execute(new SendMessage(chatId, "🛑 Game cancelled before it started."));
+            }
         }
     }
 
@@ -357,13 +439,22 @@ public class QuizBot {
 
         gameService.advance(room);
 
+        GameState g = gameService.get(room);
+
         if (gameService.isGameOver(room)) {
-            GameState g = gameService.get(room);
             if (g != null) g.setPhase(GameState.GamePhase.FINISHED);
             sendFinal(chatId, room);
-        } else {
-            startRound(chatId, room);
+            return;
         }
+
+        if (g != null && g.isPaused()) {
+            g.setAwaitingResume(true);
+            bot.execute(new SendMessage(chatId,
+                    "⏸ Game paused. Use /resumeGame to continue with the next question."));
+            return;
+        }
+
+        startRound(chatId, room);
     }
 
     // =========================

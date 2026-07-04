@@ -96,6 +96,35 @@ public class GameState {
         this.phase = phase;
     }
 
+    /**
+     * Set by /pauseGame. The current round is never interrupted - this only stops the
+     * next round from being auto-started once the round in progress finishes.
+     */
+    private volatile boolean paused = false;
+
+    public boolean isPaused() {
+        return paused;
+    }
+
+    public void setPaused(boolean paused) {
+        this.paused = paused;
+    }
+
+    /**
+     * True once a round has finished while {@link #paused} was set, meaning the game is
+     * sitting idle with no round in progress. /resumeGame checks this to know whether it
+     * must explicitly start the next round or whether one is already underway.
+     */
+    private volatile boolean awaitingResume = false;
+
+    public boolean isAwaitingResume() {
+        return awaitingResume;
+    }
+
+    public void setAwaitingResume(boolean awaitingResume) {
+        this.awaitingResume = awaitingResume;
+    }
+
     public int getRoundId() {
         return roundId.get();
     }
