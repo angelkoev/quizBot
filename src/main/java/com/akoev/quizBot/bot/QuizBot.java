@@ -48,7 +48,11 @@ public class QuizBot {
                     String callbackId = update.callbackQuery().id();
                     String room = String.valueOf(chatId);
 
-                    handleAnswer(room, chatId, userId, data, callbackId);
+                    if (data.equals("REPLAY")) {
+                        handleReplay(room, chatId, callbackId);
+                    } else {
+                        handleAnswer(room, chatId, userId, data, callbackId);
+                    }
                     continue;
                 }
 
@@ -207,7 +211,7 @@ public class QuizBot {
             StringBuilder sb = new StringBuilder("👥 Players:\n\n");
             g.players.values().forEach(p -> {
                 boolean ready = g.readyPlayers.contains(p.getId());
-                sb.append(ready ? "✅ " : "• ").append(p.getName()).append("\n");
+                sb.append(ready ? "✅ " : "❌ ").append(p.getName()).append("\n");
             });
 
             bot.execute(new SendMessage(chatId, sb.toString()));
@@ -457,7 +461,42 @@ public class QuizBot {
 
         sb.append("\n👉 /newGame to start a new game\n👉 /help for all commands");
 
-        bot.execute(new SendMessage(chatId, sb.toString()));
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup(
+                new InlineKeyboardButton[][]{
+                        {new InlineKeyboardButton("🔁 Play Again").callbackData("REPLAY")}
+                });
+
+        bot.execute(new SendMessage(chatId, sb.toString()).replyMarkup(keyboard));
+    }
+
+    /**
+     * Recreates a game in this room with the same category/count/timeout as the game
+     * that just finished, so players can rematch without retyping /newGame's arguments.
+     */
+    private void handleReplay(String room, long chatId, String callbackId) {
+
+        GameState g = gameService.get(room);
+
+        if (g == null || g.getPhase() != GameState.GamePhase.FINISHED) {
+            bot.execute(new AnswerCallbackQuery(callbackId)
+                    .text("⚠️ Can't replay right now.").showAlert(false));
+            return;
+        }
+
+        String category = g.category;
+        int count = g.getQuestions().size();
+        int timeoutSeconds = g.getTimeoutSeconds();
+
+        gameService.createGame(room, category, count, timeoutSeconds);
+
+        bot.execute(new AnswerCallbackQuery(callbackId).text("🔁 New game created!"));
+
+        bot.execute(new SendMessage(chatId,
+                "🎮 Game created!\n" +
+                        "Category: " + category + "\n" +
+                        "Questions: " + count + "\n" +
+                        "Timeout: " + timeoutSeconds + "s\n\n" +
+                        "👉 /join\n👉 /ready\n👉 /startGame\n👉 /list"));
     }
 
     private String normalizeCommand(String text) {
