@@ -16,9 +16,22 @@ public class HealthController {
 
     private static final Logger log = LoggerFactory.getLogger(HealthController.class);
 
+    /**
+     * Hit by Render's own platform health check every few seconds - not logged,
+     * since that traffic is constant and not useful signal.
+     */
     @GetMapping("/")
     public String health() {
-        log.info("Health check OK");
+        return "OK";
+    }
+
+    /**
+     * Hit only by our GitHub Actions keep-alive cron (see .github/workflows/keep-alive.yml),
+     * so this is the one endpoint worth logging to confirm the cron is actually reaching us.
+     */
+    @GetMapping("/keepalive")
+    public String keepAlive() {
+        log.info("Keep-alive ping received");
         return "OK";
     }
 }

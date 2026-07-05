@@ -10,4 +10,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping health endpoint
-        run: curl -sf https://quizbot-80ut.onrender.com/
+        run: curl -sf https://quizbot-80ut.onrender.com/keepalive
