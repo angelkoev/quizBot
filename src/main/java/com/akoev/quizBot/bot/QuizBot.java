@@ -10,10 +10,14 @@ import com.pengrad.telegrambot.model.Update;
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton;
 import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup;
 import com.pengrad.telegrambot.request.AnswerCallbackQuery;
+import com.pengrad.telegrambot.request.DeleteWebhook;
 import com.pengrad.telegrambot.request.SendMessage;
+import com.pengrad.telegrambot.request.SetWebhook;
+import com.pengrad.telegrambot.response.BaseResponse;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -26,6 +30,12 @@ public class QuizBot {
     private final TelegramBot bot;
     private final GameService gameService;
 
+    @Value("${telegram.webhook.url:}")
+    private String webhookUrl;
+
+    @Value("${telegram.webhook.secret:}")
+    private String webhookSecret;
+
     public QuizBot(GameService gameService, TelegramBot bot) {
         this.gameService = gameService;
         this.bot = bot;
@@ -34,43 +44,65 @@ public class QuizBot {
     @PostConstruct
     public void init() {
 
-        bot.setUpdatesListener(updates -> {
+        if (webhookUrl.isBlank()) {
+            bot.execute(new DeleteWebhook());
+            bot.setUpdatesListener(updates -> {
+                updates.forEach(this::onUpdate);
+                return UpdatesListener.CONFIRMED_UPDATES_ALL;
+            });
+            log.info("Telegram bot running in long-polling mode");
+            return;
+        }
 
-            for (Update update : updates) {
+        SetWebhook setWebhook = new SetWebhook().url(webhookUrl + "/telegram/webhook");
+        if (!webhookSecret.isBlank()) {
+            setWebhook.secretToken(webhookSecret);
+        }
 
-                // =========================
-                // CALLBACK (INLINE BUTTONS)
-                // =========================
-                if (update.callbackQuery() != null) {
+        BaseResponse response = bot.execute(setWebhook);
+        if (response.isOk()) {
+            log.info("Telegram bot running in webhook mode: {}/telegram/webhook", webhookUrl);
+        } else {
+            log.error("Failed to register webhook: {}", response.description());
+        }
+    }
 
-                    long chatId = update.callbackQuery().message().chat().id();
-                    long userId = update.callbackQuery().from().id();
-                    String data = update.callbackQuery().data();
-                    String callbackId = update.callbackQuery().id();
-                    String room = String.valueOf(chatId);
+    /**
+     * Routes a single update to the right handler. Called from both the long-polling
+     * listener (one update at a time from a batch) and {@code WebhookController}
+     * (one update per HTTP call), so the two delivery modes share identical behavior.
+     */
+    public void onUpdate(Update update) {
 
-                    handleCallback(room, chatId, userId, data, callbackId);
-                    continue;
-                }
+        // =========================
+        // CALLBACK (INLINE BUTTONS)
+        // =========================
+        if (update.callbackQuery() != null) {
 
-                // =========================
-                // MESSAGE
-                // =========================
-                if (update.message() == null || update.message().text() == null)
-                    continue;
+            long chatId = update.callbackQuery().message().chat().id();
+            long userId = update.callbackQuery().from().id();
+            String data = update.callbackQuery().data();
+            String callbackId = update.callbackQuery().id();
+            String room = String.valueOf(chatId);
 
-                long chatId = update.message().chat().id();
-                long userId = update.message().from().id();
-                String text = normalizeCommand(update.message().text());
-                String room = String.valueOf(chatId);
+            handleCallback(room, chatId, userId, data, callbackId);
+            return;
+        }
 
-                if (text.startsWith("/")) {
-                    handleCommand(text, chatId, userId, room, update.message().from().firstName());
-                }
-            }
+        // =========================
+        // MESSAGE
+        // =========================
+        if (update.message() == null || update.message().text() == null)
+            return;
 
-            return UpdatesListener.CONFIRMED_UPDATES_ALL;
-        });
+        long chatId = update.message().chat().id();
+        long userId = update.message().from().id();
+        String text = normalizeCommand(update.message().text());
+        String room = String.valueOf(chatId);
+
+        if (text.startsWith("/")) {
+            handleCommand(text, chatId, userId, room, update.message().from().firstName());
+        }
     }
 
     // =========================

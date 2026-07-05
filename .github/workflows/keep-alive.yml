@@ -1,13 +1,18 @@
-name: Keep Render app awake
-
-on:
-  schedule:
-    - cron: "*/5 * * * *"
-  workflow_dispatch:
-
-jobs:
-  ping:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Keep Render app awake v3
-        run: curl -sf https://quizbot-80ut.onrender.com/keepalive
+# Disabled: the bot now uses Telegram webhook mode (set TELEGRAM_WEBHOOK_URL on
+# Render), so an incoming message wakes a spun-down free-tier instance on its own.
+# Uncomment below to bring back scheduled keep-alive pinging if you ever want the
+# instance to stay warm 24/7 instead of sleeping between uses.
+#
+# name: Keep Render app awake
+#
+# on:
+#   schedule:
+#     - cron: "*/5 * * * *"
+#   workflow_dispatch:
+#
+# jobs:
+#   ping:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Keep Render app awake v3
+#         run: curl -sf https://quizbot-80ut.onrender.com/keepalive
