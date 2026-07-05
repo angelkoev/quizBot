@@ -12,12 +12,16 @@ import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup;
 import com.pengrad.telegrambot.request.AnswerCallbackQuery;
 import com.pengrad.telegrambot.request.SendMessage;
 import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
 
 @Component
 public class QuizBot {
+
+    private static final Logger log = LoggerFactory.getLogger(QuizBot.class);
 
     private final TelegramBot bot;
     private final GameService gameService;
@@ -167,6 +171,8 @@ public class QuizBot {
 
             gameService.createGame(room, category, count, timeoutSeconds);
 
+            log.info("Game created in room {} category={} count={} timeout={}s", room, category, count, timeoutSeconds);
+
             bot.execute(new SendMessage(chatId,
                     "🎮 Game created!\n" +
                             "Category: " + category + "\n" +
@@ -191,6 +197,7 @@ public class QuizBot {
             boolean joined = gameService.join(room, userId, firstName);
 
             if (joined) {
+                log.info("Player {} ({}) joined room {}", firstName, userId, room);
                 bot.execute(new SendMessage(chatId, "👤 " + firstName + " joined"));
             } else {
                 bot.execute(new SendMessage(chatId, "⚠️ Already joined"));
@@ -269,6 +276,8 @@ public class QuizBot {
 
             g.setPhase(GameState.GamePhase.IN_GAME);
 
+            log.info("Game started in room {} with {} players", room, g.players.size());
+
             startRound(chatId, room);
             return;
         }
@@ -291,6 +300,7 @@ public class QuizBot {
             }
 
             g.setPaused(true);
+            log.info("Game paused in room {}", room);
             bot.execute(new SendMessage(chatId,
                     "⏸ Game will pause after this question. Use /resumeGame to continue."));
             return;
@@ -314,6 +324,7 @@ public class QuizBot {
             }
 
             g.setPaused(false);
+            log.info("Game resumed in room {}", room);
 
             if (g.isAwaitingResume()) {
                 g.setAwaitingResume(false);
@@ -342,6 +353,8 @@ public class QuizBot {
             gameService.cancelTimer(room);
             g.tryCloseRound();
             g.setPhase(GameState.GamePhase.FINISHED);
+
+            log.info("Game ended in room {} (wasInGame={})", room, wasInGame);
 
             if (wasInGame) {
                 bot.execute(new SendMessage(chatId, "🛑 Game ended early."));
@@ -454,6 +467,7 @@ public class QuizBot {
 
         if (gameService.isGameOver(room)) {
             if (g != null) g.setPhase(GameState.GamePhase.FINISHED);
+            log.info("Game finished in room {}", room);
             sendFinal(chatId, room);
             return;
         }
@@ -546,6 +560,7 @@ public class QuizBot {
         if (g == null) return;
 
         StringBuilder sb = new StringBuilder("🏆 FINAL RESULTS:\n\n");
+        StringBuilder resultLog = new StringBuilder();
 
         g.players.keySet().stream()
                 .sorted((a, b) -> g.scores.getOrDefault(b, 0) - g.scores.getOrDefault(a, 0))
@@ -559,7 +574,12 @@ public class QuizBot {
                             .append(": ")
                             .append(score)
                             .append("\n");
+
+                    if (!resultLog.isEmpty()) resultLog.append(", ");
+                    resultLog.append(name).append("=").append(score);
                 });
+
+        log.info("Final results in room {}: {}", room, resultLog);
 
         sb.append("\n👉 /newGame to start a new game\n👉 /help for all commands");
 
@@ -590,6 +610,8 @@ public class QuizBot {
         int timeoutSeconds = g.getTimeoutSeconds();
 
         gameService.createGame(room, category, count, timeoutSeconds);
+
+        log.info("Replay: game recreated in room {} category={} count={} timeout={}s", room, category, count, timeoutSeconds);
 
         bot.execute(new AnswerCallbackQuery(callbackId).text("🔁 New game created!"));
 
